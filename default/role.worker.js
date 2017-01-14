@@ -1,85 +1,51 @@
 var roleWorker = {
-  run: function(creep) {
-    if (!creep.memory.action) {
-      creep.memory.action = 'move';
-    }
-    this[creep.memory.action].call(this, creep);
-  },
-
-  move: function(creep) {
-    var target, range, nextAction;
+  detectNextAction: function(creep) {
     if (creep.carry.energy > 0) {
-      range = 3;
-      nextAction = 'build';
+      let target = this.detectRepairTarget(creep);
+      if (target) {
+        return 'repair';
+      }
       target = this.detectBuildTarget(creep);
-      if (!target) {
-        target = this.detectRepairTarget(creep);
-        nextAction = 'repair';
-        if (!target) {
-          return;
-        }
+      if (target) {
+        return 'build';
       }
-    } else {
-      range = 1;
-      if (creep.memory.useContainers) {
-        target = this.detectWithdrawTarget(creep);
-        nextAction = 'withdraw';
-      } else {
-        target = this.detectHarvestTarget(creep);
-        nextAction = 'harvest';
+      if (creep.memory.idleFor > 12) {
+        creep.memory.wallHealth += 1000;
+        return 'transfer';
       }
-    }
-    if (creep.pos.inRangeTo(target, range)) {
-      creep.memory.action = nextAction;
-      this[nextAction].call(this, creep, target);
+      return 'idle';
     } else {
-      creep.moveTo(target);
+      return (creep.memory.useContainers) ? 'withdraw' : 'harvest';
     }
   },
 
-  build: function(creep, target) {
-    target = target || this.detectBuildTarget(creep);
-    creep.build(target);
-    if (creep.carry.energy == 0) {
-      creep.memory.action = 'move';
-    }
-  },
-
-  repair: function(creep, target) {
-    target = target || this.detectRepairTarget(creep);
-    creep.repair(target);
-    if (creep.carry.energy == 0) {
-      creep.memory.action = 'move';
-    }
-  },
-
-  harvest: function(creep, target) {
-    target = target || this.detectHarvestTarget(creep);
-    creep.harvest(target);
-    if (creep.carry.energy == creep.carryCapacity) {
-      creep.memory.action = 'move'
-    }
+  resetIdle: function(creep) {
+    creep.memory.repairMultiplier = this.defaultRepairMultiplier();
   },
 
   detectTransferTarget: function(creep) {
-    let target = creep.pos.findClosestByPath(FIND_STRUCTURES, {
+    let target = creep.pos.findClosestByPath(creep.room.ext.energyConsumers, {
       filter: (structure) => {
-        return (structure.structureType == STRUCTURE_EXTENSION || structure.structureType == STRUCTURE_SPAWN) && (structure.energy < structure.energyCapacity);
+        return structure.energy < structure.energyCapacity;
       }
     });
+    if (!target) {
+      target = creep.pos.findClosestByPath(creep.room.ext.energyStorages, {
+        filter: (structure) => {
+          return structure.availableStorage() > 0 && structure.id != creep.memory.containerId;
+        }
+      });
+    }
     return target;
   },
 
   detectWithdrawTarget: function(creep) {
-    let targets = creep.room.find(FIND_STRUCTURES, {
+    let target = creep.pos.findClosestByPath(creep.room.ext.containers, {
       filter: (structure) => {
-        return structure.structureType == STRUCTURE_CONTAINER && structure.store[RESOURCE_ENERGY] > 0
+        return structure.store[RESOURCE_ENERGY] > 0
       }
-    })
-    if (room.storage != null && room.storage.store[RESOURCE_ENERGY] > 0) {
-      targets = targets + [ room.storage ];
-    }
-    return creep.pos.findClosestByPath(targets);
+    });
+    return target;
   },
 
   detectBuildTarget: function(creep) {
@@ -87,43 +53,56 @@ var roleWorker = {
   },
 
   detectRepairTarget: function(creep) {
-    return creep.pos.findClosestByPath(FIND_MY_STRUCTURES, {
+    return creep.pos.findClosestByPath(FIND_STRUCTURES, {
       filter: (structure) => {
-          return (structure.hits < structure.hitsMax && structure.hits < 500);
+        let result = false;
+        if (structure.structureType == STRUCTURE_WALL) {
+          if (!creep.memory.wallHealth) {
+            creep.memory.wallHealth = 10000;
+          }
+          result = structure.hits < creep.memory.wallHealth;
+        } else {
+          result = (structure.hits < structure.hitsMax * creep.memory.repairMultiplier);
+        }
+        return result;
       }
     });
   },
 
   detectHarvestTarget: function(creep) {
-    var target;
-    if (creep.memory.sourceId) {
-      target = Game.getObjectById(creep.memory.sourceId)
-    } else {
-      let sources = creep.room.find(FIND_SOURCES);
-      target = this.filterSources(creep, sources);
-    }
-    return target;
+    return creep.pos.findClosestByPath(creep.room.sources);
   },
 
-  filterSources: function(creep, sources) {
-      var sourceIndex = creep.memory.sourceIndex || 1;
-      return sources[sourceIndex];
+  defaultRepairMultiplier: function() {
+    return 0.5;
   },
 
-  createCreep: function(spawn, room, currentCount) {
-    let body = [WORK, CARRY, MOVE];
-    let leftOver = room.energyAvailable - 200;
-    while (leftOver > 0) {
-      body = body + [WORK, CARRY, MOVE];
-      leftOver -= 200;
+  createCreep: function(spawn, room, currentCount, currentLimit) {
+    if (room.energyAvailable < 200) {
+      return
     }
-    let memory = { role: 'worker' };
-    let containers = room.find(FIND_STRUCTURES, {
-      filter: (structure) => {
-        return structure.structureType == STRUCTURE_CONTAINER;
+    let body = [];
+    let leftOver = room.energyAvailable;
+    if (room.energyCapacityAvailable >= 400) {
+      if (room.energyAvailable < 400) {
+        return;
       }
-    });
-    if (containers.length > 0 || room.storage != null) {
+      body.push(CARRY, CARRY, MOVE);
+      leftOver -= 150;
+    } else {
+      body.push(CARRY, MOVE);
+      leftOver -= 100;
+    }
+    while (leftOver >= 250) {
+      body.push(WORK);
+      leftOver -= 100;
+      if (leftOver >= 150) {
+        body.push(WORK, MOVE);
+        leftOver -= 150;
+      }
+    }
+    let memory = { role: 'worker', action: 'idle', repairMultiplier: this.defaultRepairMultiplier(), wallHealth: 10000};
+    if (room.ext.containers.length > 0 || room.storage != null) {
       memory['useContainers'] = true;
     }
     let result = spawn.createCreep(body, null, memory);
