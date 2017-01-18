@@ -10,7 +10,6 @@ var roleWorker = {
         return 'build';
       }
       if (creep.memory.idleFor > 12) {
-        creep.memory.wallHealth += 1000;
         return 'transfer';
       }
       return 'idle';
@@ -20,49 +19,61 @@ var roleWorker = {
   },
 
   resetIdle: function(creep) {
-    creep.memory.repairMultiplier = this.defaultRepairMultiplier();
+    // Do nothing for now
   },
 
   detectTransferTarget: function(creep) {
-    let target = creep.pos.findClosestByPath(creep.room.ext.energyConsumers, {
+    let target = creep.pos.findClosestByRange(creep.room.ext.energyConsumers, {
       filter: (structure) => {
         return structure.energy < structure.energyCapacity;
       }
     });
+
     if (!target) {
-      target = creep.pos.findClosestByPath(creep.room.ext.energyStorages, {
-        filter: (structure) => {
-          return structure.availableStorage() > 0 && structure.id != creep.memory.containerId;
-        }
+      target = _.find(creep.room.ext.towers, (tower) => {
+        return tower.availableStorage() > 0;
       });
+      if (!target) {
+        target = creep.pos.findClosestByRange(creep.room.ext.energyStorages, {
+          filter: (structure) => {
+            return structure.availableStorage() > 0 && structure.id != creep.memory.containerId;
+          }
+        });
+      }
     }
     return target;
   },
 
   detectWithdrawTarget: function(creep) {
-    let target = creep.pos.findClosestByPath(creep.room.ext.containers, {
+    let containers = creep.room.ext.nonSourceContainers.length > 0 ? creep.room.ext.nonSourceContainers : creep.room.ext.containers;
+    if (creep.room.storage) {
+      containers = containers.concat([creep.room.storage]);
+    }
+    let target = creep.pos.findClosestByRange(containers, {
       filter: (structure) => {
-        return structure.store[RESOURCE_ENERGY] > 0
+        return structure.store[RESOURCE_ENERGY] > 0 && (creep.room.ext.controllerContainer == null || structure.id != creep.room.ext.controllerContainer.id);
       }
     });
+    if (!target) {
+      target = creep.pos.findClosestByRange(creep.room.ext.sourceContainers, (container) => {
+        return container.availableStorage() < 1000;
+      });
+    }
     return target;
   },
 
   detectBuildTarget: function(creep) {
-    return creep.pos.findClosestByPath(FIND_CONSTRUCTION_SITES);
+    return creep.pos.findClosestByRange(FIND_CONSTRUCTION_SITES);
   },
 
   detectRepairTarget: function(creep) {
-    return creep.pos.findClosestByPath(FIND_STRUCTURES, {
+    return creep.pos.findClosestByRange(FIND_STRUCTURES, {
       filter: (structure) => {
         let result = false;
         if (structure.structureType == STRUCTURE_WALL) {
-          if (!creep.memory.wallHealth) {
-            creep.memory.wallHealth = 10000;
-          }
-          result = structure.hits < creep.memory.wallHealth;
+          result = structure.hits < creep.room.ext.creepWallHealth();
         } else {
-          result = (structure.hits < structure.hitsMax * creep.memory.repairMultiplier);
+          result = (structure.hits < structure.hitsMax * creep.room.ext.creepRepairMultiplier());
         }
         return result;
       }
@@ -70,11 +81,7 @@ var roleWorker = {
   },
 
   detectHarvestTarget: function(creep) {
-    return creep.pos.findClosestByPath(creep.room.sources);
-  },
-
-  defaultRepairMultiplier: function() {
-    return 0.5;
+    return creep.pos.findClosestByRange(creep.room.ext.sources);
   },
 
   createCreep: function(spawn, room, currentCount, currentLimit) {
@@ -83,25 +90,21 @@ var roleWorker = {
     }
     let body = [];
     let leftOver = room.energyAvailable;
-    if (room.energyCapacityAvailable >= 400) {
-      if (room.energyAvailable < 400) {
+    if (room.energyCapacityAvailable >= 650) {
+      if (room.energyAvailable < 650) {
         return;
       }
       body.push(CARRY, CARRY, MOVE);
       leftOver -= 150;
     } else {
-      body.push(CARRY, MOVE);
-      leftOver -= 100;
+      body.push(CARRY, MOVE, WORK);
+      leftOver -= 200;
     }
     while (leftOver >= 250) {
-      body.push(WORK);
-      leftOver -= 100;
-      if (leftOver >= 150) {
-        body.push(WORK, MOVE);
-        leftOver -= 150;
-      }
+      body.push(WORK, WORK, MOVE);
+      leftOver -= 250;
     }
-    let memory = { role: 'worker', action: 'idle', repairMultiplier: this.defaultRepairMultiplier(), wallHealth: 10000};
+    let memory = { role: 'worker', action: 'idle' };
     if (room.ext.containers.length > 0 || room.storage != null) {
       memory['useContainers'] = true;
     }

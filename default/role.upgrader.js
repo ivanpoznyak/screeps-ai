@@ -20,8 +20,8 @@ var roleUpgrader = {
       return;
     }
     body = [WORK, CARRY, MOVE];
-    if (room.energyCapacityAvailable >= 700) {
-      if (room.energyAvailable >= 700) {
+    if (room.energyCapacityAvailable >= 650) {
+      if (room.energyAvailable >= 650) {
         body = [WORK, WORK, WORK, WORK, WORK, MOVE, CARRY, CARRY];
       } else {
         if (currentCount > 0) {
@@ -38,11 +38,11 @@ var roleUpgrader = {
     let memory = { role: 'upgrader', action: 'idle' };
     let all = room.ext.sources.concat(room.ext.containers);
     let target = room.controller.pos.findClosestByRange(all);
-    if (target && target.ticksToRegeneration) {
-      memory['sourceId'] = target.id;
-    } else {
+    if (target && target.structureType == STRUCTURE_CONTAINER) {
       memory['useContainers'] = true;
       memory['containerId'] = target.id;
+    } else {
+      memory['sourceId'] = target.id;
     }
     let result = spawn.createCreep(body, null, memory);
   }

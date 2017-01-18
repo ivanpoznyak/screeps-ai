@@ -15,7 +15,7 @@ var roleMiner = {
     if (creep.memory.containerId) {
       return Game.getObjectById(creep.memory.containerId);
     }
-    return creep.pos.findClosestByPath(creep.room.ext.energyConsumers, {
+    return creep.pos.findClosestByRange(creep.room.ext.energyConsumers, {
       filter: (structure) => {
         return structure.energy < structure.energyCapacity;
       }
